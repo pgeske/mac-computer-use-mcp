@@ -1,0 +1,38 @@
+{
+  "name": "@pgeske/mac-computer-use-mcp",
+  "version": "0.1.0",
+  "description": "Use OpenAI's installed macOS Computer Use tools from any MCP harness, without a nested agent.",
+  "license": "MIT",
+  "type": "module",
+  "repository": "github:pgeske/mac-computer-use-mcp",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "bin": {
+    "mac-computer-use-mcp": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "SECURITY.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "prettier --check .",
+    "format": "prettier --write .",
+    "test": "node --test --test-timeout=15000 test/*.test.mjs",
+    "test:live": "node scripts/calculator-smoke.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "ajv": "8.20.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "prettier": "^3.0.0",
+    "typescript": "^5.9.0"
+  }
+}
