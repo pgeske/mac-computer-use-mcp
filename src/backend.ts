@@ -138,7 +138,7 @@ export class CodexBackend implements Backend {
       await this.rpc.request(
         "initialize",
         {
-          clientInfo: { name: "mac_computer_use_mcp", version: "0.1.0" },
+          clientInfo: { name: "mac_computer_use_mcp", version: "0.2.0" },
           capabilities: { experimentalApi: true },
         },
         lifetimeSignal,

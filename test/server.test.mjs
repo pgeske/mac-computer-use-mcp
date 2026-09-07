@@ -29,7 +29,7 @@ const state = {
   ],
 };
 
-async function setup(t, { args = [], approval, call, tools } = {}) {
+async function setup(t, { args = [], approval, call, tools, idleMs } = {}) {
   const calls = [];
   let closes = 0;
   let discoveries = 0;
@@ -46,7 +46,9 @@ async function setup(t, { args = [], approval, call, tools } = {}) {
       closes++;
     },
   };
-  const server = createServer(backend, parseOptions(args));
+  const options = parseOptions(args);
+  if (idleMs !== undefined) options.idleMs = idleMs;
+  const server = createServer(backend, options);
   const client = new Client(
     { name: "test", version: "1" },
     { capabilities: approval ? { elicitation: { form: {} } } : {} },
@@ -163,7 +165,7 @@ test("declined and cancelled approvals never dispatch", async (t) => {
   }
 });
 
-test("untrusted app approvals are requested for every operation", async (t) => {
+test("one session approval covers actions, other apps, and app inventory", async (t) => {
   let approvals = 0;
   const { client } = await setup(t, {
     approval: async () => {
@@ -173,7 +175,122 @@ test("untrusted app approvals are requested for every operation", async (t) => {
   });
   await invoke(client, "get_app_state", { app });
   await invoke(client, "click", { app });
+  await invoke(client, "get_app_state", { app: "com.google.Chrome" });
+  await invoke(client, "click", { app: "com.google.Chrome" });
+  await invoke(client, "list_apps");
+  assert.equal(approvals, 1);
+  const status = await invoke(client, "computer_use_status");
+  assert.equal(JSON.parse(status.content[0].text).sessionApproved, true);
+});
+
+test("stop and idle expiry revoke session approval", async (t) => {
+  for (const expiry of ["stop", "idle"]) {
+    let approvals = 0;
+    const s = await setup(t, {
+      idleMs: expiry === "idle" ? 20 : undefined,
+      approval: async () => {
+        approvals++;
+        return { action: "accept", content: {} };
+      },
+    });
+    await invoke(s.client, "get_app_state", { app });
+    if (expiry === "stop") await invoke(s.client, "computer_use_stop");
+    else await new Promise((resolve) => setTimeout(resolve, 60));
+    await invoke(s.client, "get_app_state", { app });
+    assert.equal(approvals, 2, expiry);
+  }
+});
+
+test("new connections do not inherit approval from a previous client", async (t) => {
+  const first = await setup(t, {
+    approval: async () => ({ action: "accept", content: {} }),
+  });
+  await invoke(first.client, "get_app_state", { app });
+  await first.client.close();
+  const second = await setup(t);
+  assert.equal(
+    (await invoke(second.client, "get_app_state", { app })).isError,
+    true,
+  );
+  assert.equal(second.calls.length, 0);
+});
+
+test("backend failures revoke approval before the next attempt", async (t) => {
+  let approvals = 0;
+  let attempts = 0;
+  const s = await setup(t, {
+    approval: async () => {
+      approvals++;
+      return { action: "accept", content: {} };
+    },
+    call: async () => {
+      if (++attempts === 1) throw new Error("failed");
+      return state;
+    },
+  });
+  assert.equal(
+    (await invoke(s.client, "get_app_state", { app })).isError,
+    true,
+  );
+  await invoke(s.client, "get_app_state", { app });
   assert.equal(approvals, 2);
+});
+
+test("stop during approval cannot grant a subsequent session", async (t) => {
+  let release;
+  let entered;
+  const pending = new Promise((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  let approvals = 0;
+  const s = await setup(t, {
+    approval: async () => {
+      approvals++;
+      if (approvals === 1) {
+        entered();
+        await pending;
+      }
+      return { action: "accept", content: {} };
+    },
+  });
+  const first = invoke(s.client, "get_app_state", { app });
+  await started;
+  await invoke(s.client, "computer_use_stop");
+  release();
+  assert.equal((await first).isError, true);
+  await invoke(s.client, "get_app_state", { app });
+  assert.equal(approvals, 2);
+  assert.equal(s.calls.length, 1);
+});
+
+test("session approval never automatically answers native permission requests", async (t) => {
+  const messages = [];
+  const s = await setup(t, {
+    approval: async (request) => {
+      messages.push(request.params.message);
+      return messages.length === 1
+        ? { action: "accept", content: {} }
+        : { action: "decline" };
+    },
+    call: async (_name, _args, _signal, elicit) => {
+      assert.deepEqual(
+        await elicit({
+          mode: "form",
+          message: "Native permission",
+          requestedSchema: { type: "object", properties: {} },
+        }),
+        { action: "decline" },
+      );
+      return state;
+    },
+  });
+  await invoke(s.client, "get_app_state", { app });
+  assert.equal(messages.length, 2);
+  assert.match(messages[0], /across apps/);
+  assert.equal(messages[1], "Native permission");
 });
 
 test("native elicitation is forwarded and is not implicitly approved by --trust-app", async (t) => {

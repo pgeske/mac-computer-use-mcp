@@ -1,6 +1,6 @@
 {
   "name": "@pgeske/mac-computer-use-mcp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Use OpenAI's installed macOS Computer Use tools from any MCP harness, without a nested agent.",
   "license": "MIT",
   "type": "module",

@@ -18,7 +18,8 @@ Usage: mac-computer-use-mcp [options]
   --doctor               Verify installed binaries; does not access app contents
   --help                 Show help
 
-Without --trust-app, desktop operations require interactive MCP form approval.
+Without --trust-app, enabling a session requires interactive MCP form approval.
+One approval covers apps until stop, idle expiry, error, or reconnect.
 macOS Accessibility/Screen Recording permissions are still required.
 This bridge does not run a model and is not an OS security sandbox.
 `;

@@ -38,7 +38,7 @@ Download/install the versioned package from this repository’s [releases](https
 
 ```sh
 npm install -g --ignore-scripts \
-  https://github.com/pgeske/mac-computer-use-mcp/releases/download/v0.1.0/pgeske-mac-computer-use-mcp-0.1.0.tgz
+  https://github.com/pgeske/mac-computer-use-mcp/releases/download/v0.2.0/pgeske-mac-computer-use-mcp-0.2.0.tgz
 mac-computer-use-mcp --doctor
 ```
 
@@ -89,7 +89,11 @@ To disable it in Pi: `/mcp disable mac-computer-use`, then `/reload`. To re-enab
 
 ### Trust a specific app
 
-By default, **every desktop operation requires a host-side MCP approval**. Clients without form elicitation fail closed. For an app you explicitly want the agent to operate without the bridge’s per-call prompts:
+By default, **one host-side MCP approval enables computer use across apps for the current session**. After you approve, routine inspection, navigation, clicking, and typing do not prompt again. Stop, five-minute idle expiry, errors, or reconnecting revoke that approval. This session belongs to one server connection, not to all harnesses or the lifetime of a Pi conversation.
+
+Native OpenAI/macOS permission prompts remain separate. Consequential actions—sending, deletion, purchases, and security changes—still require confirmation through the calling agent's instructions, not a semantic classifier in this bridge.
+
+Clients without form elicitation fail closed. For a specific app you explicitly want available without the initial bridge session prompt:
 
 ```json
 {
@@ -113,7 +117,7 @@ The bridge discovers and validates the **live tool schemas** from your installed
 | Tool                       | Purpose                                                                     |
 | -------------------------- | --------------------------------------------------------------------------- |
 | `get_app_state`            | Start/inspect an app session; accessibility text and screenshot             |
-| `list_apps`                | Read the native app inventory; requires approval                            |
+| `list_apps`                | Read the native app inventory; covered by session approval                  |
 | `click`, `drag`, `scroll`  | Operate UI elements or screenshot coordinates                               |
 | `press_key`, `type_text`   | Keyboard input                                                              |
 | `set_value`, `select_text` | Accessible controls and text selection                                      |
