@@ -6,7 +6,7 @@ This server controls real Mac apps. Screenshots, accessibility text, and typed i
 
 - The host's launch configuration is trusted. The model cannot change `--trust-app`, `--read-only`, or the installed executable path through a tool.
 - Without exact app trust, one MCP form approval enables desktop operations across apps for that server session. Stop, idle expiry, errors, and reconnecting revoke it. No approval is persisted to disk or shared with other connections. Decline, cancellation, missing UI support, and malformed native approval requests fail closed.
-- Native permission requests still require the host's response. A trusted app does not bypass macOS or OpenAI permission checks.
+- Explicit session consent covers the observed native app-access form only during `get_app_state`: the configured `computer-use` server, exact `Allow ChatGPT to use [app]?` wording, empty form schema, and known persistence-option metadata. The acceptance contains no persistence metadata. There is no stable upstream app-access kind field, so changed or unfamiliar shapes fall back to host approval. Exact-app launch trust alone does not grant this native consent. Other native prompts still require the host's response, and macOS permissions are never changed.
 - All UI actions are advertised as potentially destructive and open-world. Tool annotations are hints, not enforcement.
 - App inspection requires an exact bundle ID and can launch that app. Read-only mode is not a promise of zero desktop side effects.
 - App-level trust is broad. A browser, terminal, or settings app can affect data and systems outside its own window. The bridge cannot infer whether clicking a button sends money or deletes a file.

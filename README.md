@@ -38,7 +38,7 @@ Download/install the versioned package from this repository’s [releases](https
 
 ```sh
 npm install -g --ignore-scripts \
-  https://github.com/pgeske/mac-computer-use-mcp/releases/download/v0.2.0/pgeske-mac-computer-use-mcp-0.2.0.tgz
+  https://github.com/pgeske/mac-computer-use-mcp/releases/download/v0.3.0/pgeske-mac-computer-use-mcp-0.3.0.tgz
 mac-computer-use-mcp --doctor
 ```
 
@@ -91,7 +91,7 @@ To disable it in Pi: `/mcp disable mac-computer-use`, then `/reload`. To re-enab
 
 By default, **one host-side MCP approval enables computer use across apps for the current session**. After you approve, routine inspection, navigation, clicking, and typing do not prompt again. Stop, five-minute idle expiry, errors, or reconnecting revoke that approval. This session belongs to one server connection, not to all harnesses or the lifetime of a Pi conversation.
 
-Native OpenAI/macOS permission prompts remain separate. Consequential actions—sending, deletion, purchases, and security changes—still require confirmation through the calling agent's instructions, not a semantic classifier in this bridge.
+Session approval also covers the recognized native **“Allow ChatGPT to use [app]?”** confirmation during `get_app_state`. The bridge returns a session-only acceptance with no persistence metadata. It requires the complete known empty-form shape from the configured Computer Use server; unknown formats, other prompts, and prompts during mutations still go to you. macOS Accessibility/Screen Recording permissions are not changed. Consequential actions—sending, deletion, purchases, and security changes—still require confirmation through the calling agent's instructions, not a semantic classifier in this bridge.
 
 Clients without form elicitation fail closed. For a specific app you explicitly want available without the initial bridge session prompt:
 
@@ -106,7 +106,7 @@ Clients without form elicitation fail closed. For a specific app you explicitly 
 }
 ```
 
-Repeat `--trust-app` to add exact bundle IDs. Names, paths, and wildcards are rejected. Native OpenAI/macOS permission requests are **still forwarded**, not auto-approved; a first-time native prompt can require an interactive client even for a trusted app. Restart the server to revoke bridge trust or clear the configuration.
+Repeat `--trust-app` to add exact bundle IDs. Names, paths, and wildcards are rejected. `--trust-app` alone does **not** authorize native app-access requests: those are forwarded unless an explicit bridge session approval has also been granted. Unknown native requests and macOS permissions always remain separate. Restart the server to revoke bridge trust or clear the configuration.
 
 App trust authorizes access, not arbitrary purchases, messages, or deletion. Trusting a browser or terminal grants a broad practical capability; use narrow task instructions and confirm consequential actions. See [SECURITY.md](SECURITY.md).
 
@@ -138,7 +138,7 @@ Workflow: **inspect → act sequentially → inspect/verify → stop**. An actio
 - Exposes no generic RPC, shell, JavaScript execution, or model-turn tool. Unexpected model-turn events stop the connection.
 - Returns screenshots as native MCP image blocks. The bridge does not write screenshot or app-content logs. **Your harness/model receives this content and may retain it.** OpenAI’s installed service has its own behavior and settings.
 - Serializes calls within a server instance. Idle sessions expire after five minutes; stop/cancellation interrupt active work and invalidate queued actions. Orderly shutdown closes the backend's input; unexpected exits or forced cleanup report uncertainty and retain private state for inspection.
-- Does not automatically grant macOS permissions or silently approve native permission requests.
+- Does not automatically grant macOS permissions. Explicit session consent covers only recognized native app-access forms during inspection, without permanent approval; everything else is forwarded or denied.
 
 **Only run one computer-use harness on a desktop at a time.** Separate server instances do not coordinate a global desktop lock. Do not use this on a sensitive live account without understanding the scope of app access. This is not an OS sandbox or a defense against a fully privileged malicious harness.
 
@@ -157,7 +157,7 @@ Workflow: **inspect → act sequentially → inspect/verify → stop**. An actio
 
 - **Missing client:** finish Computer Use installation in the official app. We do not download or redistribute OpenAI’s binaries.
 - **Signature failure:** reinstall/update the official app; do not disable verification.
-- **Permission cancelled:** approve the native request in an interactive MCP client. A headless client cannot answer it automatically.
+- **Permission cancelled:** approve the session or an unrecognized native request in an interactive MCP client. A headless client cannot grant a session automatically. If a backend update changes the known app-access form, the bridge asks rather than guessing.
 - **Timeout/cancelled action:** stop, reconnect, and inspect the app before retrying. The action may already have happened.
 - **Backend changed:** run `--doctor`, inspect tool discovery, and report the app-server version and a sanitized error. Never include screenshots, credentials, or private app content in an issue.
 
@@ -177,7 +177,7 @@ Tests use fake backends and in-memory MCP transports; they do not control your d
 MAC_COMPUTER_USE_LIVE=1 npm run test:live
 ```
 
-That test explicitly permits only the native Calculator approval, clears its current entry, computes `4 + 5`, verifies the result text is `9`, checks for an image response, and stops the session. It leaves Calculator open and changes its current calculation/history.
+That test grants one bridge session approval but issues only Calculator operations. It clears the current entry, computes `4 + 5`, verifies the result text is `9`, checks for an image response, and stops the session. It asserts that no second approval request reached the client; unexpected native requests are cancelled. It leaves Calculator open and changes its current calculation/history.
 
 ### Primary implementation references
 

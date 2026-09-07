@@ -266,7 +266,92 @@ test("stop during approval cannot grant a subsequent session", async (t) => {
   assert.equal(s.calls.length, 1);
 });
 
-test("session approval never automatically answers native permission requests", async (t) => {
+const nativeAppRequest = {
+  serverName: "computer-use",
+  mode: "form",
+  message: "Allow ChatGPT to use Calculator?",
+  requestedSchema: { type: "object", properties: {} },
+  _meta: { persist: ["always"] },
+};
+
+test("session consent covers native app access without requesting persistent approval", async (t) => {
+  let prompts = 0;
+  const replies = [];
+  const s = await setup(t, {
+    approval: async () => {
+      prompts++;
+      return { action: "accept", content: {} };
+    },
+    call: async (_name, args, _signal, elicit) => {
+      replies.push(
+        await elicit({
+          ...nativeAppRequest,
+          message: `Allow ChatGPT to use ${args.app === app ? "Calculator" : "Google Chrome"}?`,
+        }),
+      );
+      return state;
+    },
+  });
+  await invoke(s.client, "get_app_state", { app });
+  await invoke(s.client, "get_app_state", { app: "com.google.Chrome" });
+  assert.equal(prompts, 1);
+  assert.deepEqual(replies, [
+    { action: "accept", content: {} },
+    { action: "accept", content: {} },
+  ]);
+});
+
+test("exact-app launch trust alone does not approve native app access", async (t) => {
+  const s = await setup(t, {
+    args: ["--trust-app", app],
+    call: async (_name, _args, _signal, elicit) => {
+      assert.deepEqual(await elicit(nativeAppRequest), { action: "cancel" });
+      return state;
+    },
+  });
+  await invoke(s.client, "get_app_state", { app });
+});
+
+test("an app-access-looking prompt during mutation is still forwarded", async (t) => {
+  let prompts = 0;
+  const s = await setup(t, {
+    approval: async () => {
+      prompts++;
+      return prompts === 1
+        ? { action: "accept", content: {} }
+        : { action: "decline" };
+    },
+    call: async (name, _args, _signal, elicit) => {
+      if (name === "click")
+        assert.deepEqual(await elicit(nativeAppRequest), { action: "decline" });
+      return state;
+    },
+  });
+  await invoke(s.client, "get_app_state", { app });
+  await invoke(s.client, "click", { app });
+  assert.equal(prompts, 2);
+});
+
+test("old native callbacks cannot reuse consent after stop and a new approval", async (t) => {
+  const callbacks = [];
+  const s = await setup(t, {
+    approval: async () => ({ action: "accept", content: {} }),
+    call: async (_name, _args, _signal, elicit) => {
+      callbacks.push(elicit);
+      return state;
+    },
+  });
+  await invoke(s.client, "get_app_state", { app });
+  await invoke(s.client, "computer_use_stop");
+  await invoke(s.client, "get_app_state", { app });
+  assert.deepEqual(await callbacks[0](nativeAppRequest), { action: "cancel" });
+  assert.deepEqual(await callbacks[1](nativeAppRequest), {
+    action: "accept",
+    content: {},
+  });
+});
+
+test("session approval still forwards unrecognized native permission requests", async (t) => {
   const messages = [];
   const s = await setup(t, {
     approval: async (request) => {

@@ -12,25 +12,29 @@ const client = new Client(
   { name: "calculator-smoke", version: "0.1.0" },
   { capabilities: { elicitation: { form: {} } } },
 );
+let approvalRequests = 0;
 client.setRequestHandler(ElicitRequestSchema, async (request) => {
-  // The caller explicitly opted into a Calculator-only test, never arbitrary app access.
+  approvalRequests++;
+  // The opt-in test grants a session but only issues Calculator operations.
+  // Any forwarded native prompt makes this regression test fail, rather than masking it.
   if (
+    approvalRequests === 1 &&
     request.params.mode === "form" &&
-    request.params.message === "Allow ChatGPT to use Calculator?" &&
+    request.params.message.startsWith(
+      "Enable computer use for this session across apps?",
+    ) &&
     Object.keys(request.params.requestedSchema.properties).length === 0
   ) {
-    console.log("Approving the native Calculator access request for this test");
+    console.log(
+      "Approving one computer-use session for the Calculator-only test",
+    );
     return { action: "accept", content: {} };
   }
   return { action: "cancel" };
 });
 const transport = new StdioClientTransport({
   command: process.execPath,
-  args: [
-    new URL("../dist/cli.js", import.meta.url).pathname,
-    "--trust-app",
-    "com.apple.calculator",
-  ],
+  args: [new URL("../dist/cli.js", import.meta.url).pathname],
   stderr: "inherit",
 });
 const app = "com.apple.calculator";
@@ -63,6 +67,11 @@ try {
   assert.ok(
     after.result.content.some((block) => block.type === "image"),
     "Expected a native MCP screenshot",
+  );
+  assert.equal(
+    approvalRequests,
+    1,
+    "Expected only the bridge session approval",
   );
   await call("computer_use_stop", {});
   console.log(
