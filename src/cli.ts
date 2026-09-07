@@ -19,7 +19,8 @@ Usage: mac-computer-use-mcp [options]
   --help                 Show help
 
 Without --trust-app, enabling a session requires interactive MCP form approval.
-One approval covers apps until stop, idle expiry, error, or reconnect.
+One approval covers apps until explicit revoke or connection shutdown/reload.
+Routine stop and native-backend idle cleanup keep consent for the next task.
 macOS Accessibility/Screen Recording permissions are still required.
 This bridge does not run a model and is not an OS security sandbox.
 `;

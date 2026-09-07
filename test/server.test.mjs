@@ -5,6 +5,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createServer } from "../dist/server.js";
 import { parseOptions } from "../dist/options.js";
+import { nativeHighRiskWarning } from "../dist/app-approval.js";
 
 const app = "com.apple.calculator";
 const catalog = ["get_app_state", "click", "type_text"].map((name) => ({
@@ -29,7 +30,10 @@ const state = {
   ],
 };
 
-async function setup(t, { args = [], approval, call, tools, idleMs } = {}) {
+async function setup(
+  t,
+  { args = [], approval, call, close, tools, idleMs } = {},
+) {
   const calls = [];
   let closes = 0;
   let discoveries = 0;
@@ -44,6 +48,7 @@ async function setup(t, { args = [], approval, call, tools, idleMs } = {}) {
     },
     async close() {
       closes++;
+      if (close) await close();
     },
   };
   const options = parseOptions(args);
@@ -80,7 +85,7 @@ async function invoke(client, name, args = {}) {
 test("discovery retains live schemas, excludes unknown tools, and uses conservative hints", async (t) => {
   const { client } = await setup(t);
   const result = await client.listTools();
-  assert.equal(result.tools.length, 6);
+  assert.equal(result.tools.length, 7);
   const click = result.tools.find((tool) => tool.name === "click");
   assert.deepEqual(click.inputSchema, catalog[1].inputSchema);
   assert.equal(click.annotations.destructiveHint, true);
@@ -183,7 +188,7 @@ test("one session approval covers actions, other apps, and app inventory", async
   assert.equal(JSON.parse(status.content[0].text).sessionApproved, true);
 });
 
-test("stop and idle expiry revoke session approval", async (t) => {
+test("routine stop and backend idle cleanup preserve connection approval", async (t) => {
   for (const expiry of ["stop", "idle"]) {
     let approvals = 0;
     const s = await setup(t, {
@@ -196,8 +201,13 @@ test("stop and idle expiry revoke session approval", async (t) => {
     await invoke(s.client, "get_app_state", { app });
     if (expiry === "stop") await invoke(s.client, "computer_use_stop");
     else await new Promise((resolve) => setTimeout(resolve, 60));
+    const status = await invoke(s.client, "computer_use_status");
+    assert.equal(JSON.parse(status.content[0].text).sessionApproved, true);
+    assert.equal(JSON.parse(status.content[0].text).inspectedApp, null);
+    assert.ok(s.closes > 0);
     await invoke(s.client, "get_app_state", { app });
-    assert.equal(approvals, 2, expiry);
+    await invoke(s.client, "click", { app });
+    assert.equal(approvals, 1, expiry);
   }
 });
 
@@ -215,7 +225,7 @@ test("new connections do not inherit approval from a previous client", async (t)
   assert.equal(second.calls.length, 0);
 });
 
-test("backend failures revoke approval before the next attempt", async (t) => {
+test("backend failures release app state without losing connection approval", async (t) => {
   let approvals = 0;
   let attempts = 0;
   const s = await setup(t, {
@@ -233,7 +243,59 @@ test("backend failures revoke approval before the next attempt", async (t) => {
     true,
   );
   await invoke(s.client, "get_app_state", { app });
+  assert.equal(approvals, 1);
+});
+
+test("explicit revoke clears consent before the next task", async (t) => {
+  let approvals = 0;
+  const s = await setup(t, {
+    approval: async () => {
+      approvals++;
+      return { action: "accept", content: {} };
+    },
+  });
+  await invoke(s.client, "get_app_state", { app });
+  await invoke(s.client, "computer_use_revoke");
+  const status = await invoke(s.client, "computer_use_status");
+  assert.equal(JSON.parse(status.content[0].text).sessionApproved, false);
+  assert.equal(JSON.parse(status.content[0].text).inspectedApp, null);
+  await invoke(s.client, "get_app_state", { app });
   assert.equal(approvals, 2);
+});
+
+test("revoke during backend release clears consent and cancels queued work", async (t) => {
+  let releaseClose;
+  let enteredClose;
+  const pendingClose = new Promise((resolve) => {
+    releaseClose = resolve;
+  });
+  const closing = new Promise((resolve) => {
+    enteredClose = resolve;
+  });
+  let approvals = 0;
+  const s = await setup(t, {
+    approval: async () => {
+      approvals++;
+      return { action: "accept", content: {} };
+    },
+    close: () => {
+      enteredClose();
+      return pendingClose;
+    },
+  });
+  await invoke(s.client, "get_app_state", { app });
+  const stopped = invoke(s.client, "computer_use_stop");
+  await closing;
+  const queued = invoke(s.client, "get_app_state", { app });
+  const revoked = invoke(s.client, "computer_use_revoke");
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseClose();
+  await stopped;
+  await revoked;
+  assert.equal((await queued).isError, true);
+  await invoke(s.client, "get_app_state", { app });
+  assert.equal(approvals, 2);
+  assert.equal(s.calls.length, 2);
 });
 
 test("stop during approval cannot grant a subsequent session", async (t) => {
@@ -274,12 +336,13 @@ const nativeAppRequest = {
   _meta: { persist: ["always"] },
 };
 
-test("session consent covers native app access without requesting persistent approval", async (t) => {
+test("one connection grant covers Calculator and Chrome warning forms across tasks", async (t) => {
   let prompts = 0;
   const replies = [];
   const s = await setup(t, {
-    approval: async () => {
+    approval: async (request) => {
       prompts++;
+      assert.ok(request.params.message.includes(nativeHighRiskWarning));
       return { action: "accept", content: {} };
     },
     call: async (_name, args, _signal, elicit) => {
@@ -287,15 +350,27 @@ test("session consent covers native app access without requesting persistent app
         await elicit({
           ...nativeAppRequest,
           message: `Allow ChatGPT to use ${args.app === app ? "Calculator" : "Google Chrome"}?`,
+          _meta:
+            args.app === app
+              ? nativeAppRequest._meta
+              : {
+                  persist: ["always"],
+                  riskLevel: "high",
+                  subtitle: nativeHighRiskWarning,
+                },
         }),
       );
       return state;
     },
   });
   await invoke(s.client, "get_app_state", { app });
+  await invoke(s.client, "computer_use_stop");
+  await invoke(s.client, "get_app_state", { app: "com.google.Chrome" });
+  await invoke(s.client, "computer_use_stop");
   await invoke(s.client, "get_app_state", { app: "com.google.Chrome" });
   assert.equal(prompts, 1);
   assert.deepEqual(replies, [
+    { action: "accept", content: {} },
     { action: "accept", content: {} },
     { action: "accept", content: {} },
   ]);
@@ -332,7 +407,7 @@ test("an app-access-looking prompt during mutation is still forwarded", async (t
   assert.equal(prompts, 2);
 });
 
-test("old native callbacks cannot reuse consent after stop and a new approval", async (t) => {
+test("old native callbacks cannot reuse retained consent after backend stop", async (t) => {
   const callbacks = [];
   const s = await setup(t, {
     approval: async () => ({ action: "accept", content: {} }),

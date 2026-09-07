@@ -23,6 +23,24 @@ test("recognizes the observed native app-access form, including different app la
   );
 });
 
+const browserWarningMeta = {
+  persist: ["always"],
+  riskLevel: "high",
+  subtitle:
+    "Allowing ChatGPT to use this app introduces new risks, including those related to prompt injection attacks, such as data theft or loss. Carefully monitor ChatGPT while it uses this app.",
+};
+
+test("recognizes the actual Chrome high-risk-app warning variant", () => {
+  assert.equal(
+    isNativeAppAccessRequest({
+      ...request,
+      message: "Allow ChatGPT to use Google Chrome?",
+      _meta: browserWarningMeta,
+    }),
+    true,
+  );
+});
+
 test("unknown, security, nonempty, and expanded native forms are not auto-approved", () => {
   const cases = [
     {
@@ -55,6 +73,19 @@ test("unknown, security, nonempty, and expanded native forms are not auto-approv
       },
     },
     { ...request, _meta: undefined },
+    {
+      ...request,
+      _meta: {
+        ...browserWarningMeta,
+        subtitle: "Grant additional security permissions",
+      },
+    },
+    { ...request, _meta: { ...browserWarningMeta, riskLevel: "critical" } },
+    { ...request, _meta: { persist: ["always"], riskLevel: "high" } },
+    {
+      ...request,
+      _meta: { ...browserWarningMeta, additionalPermission: true },
+    },
     { ...request, _meta: { persist: ["always"], additionalPermission: true } },
     { ...request, newPermissionField: true },
   ];

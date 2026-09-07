@@ -38,7 +38,7 @@ Download/install the versioned package from this repository’s [releases](https
 
 ```sh
 npm install -g --ignore-scripts \
-  https://github.com/pgeske/mac-computer-use-mcp/releases/download/v0.3.0/pgeske-mac-computer-use-mcp-0.3.0.tgz
+  https://github.com/pgeske/mac-computer-use-mcp/releases/download/v0.4.0/pgeske-mac-computer-use-mcp-0.4.0.tgz
 mac-computer-use-mcp --doctor
 ```
 
@@ -79,6 +79,8 @@ Install [Pi’s MCP adapter](https://www.npmjs.com/package/pi-mcp-adapter), then
 pi install npm:pi-mcp-adapter
 ```
 
+Set `"lifecycle": "lazy-keep-alive"` on Pi's `mac-computer-use` server entry. This keeps the lightweight MCP connection—and its consent—alive between tasks. The native desktop backend still shuts down on stop or idle cleanup. A disconnected/restarted MCP server cannot retain in-memory consent.
+
 Restart Pi or run `/reload` after configuring the server. Ask:
 
 > Use mac-computer-use to calculate 4 + 5 in Calculator. Inspect the result and stop the computer-use session when finished.
@@ -89,9 +91,9 @@ To disable it in Pi: `/mcp disable mac-computer-use`, then `/reload`. To re-enab
 
 ### Trust a specific app
 
-By default, **one host-side MCP approval enables computer use across apps for the current session**. After you approve, routine inspection, navigation, clicking, and typing do not prompt again. Stop, five-minute idle expiry, errors, or reconnecting revoke that approval. This session belongs to one server connection, not to all harnesses or the lifetime of a Pi conversation.
+By default, **one host-side MCP approval enables computer use across apps for the lifetime of this MCP connection**. Routine inspection, navigation, clicking, and typing do not prompt again. `computer_use_stop`, five-minute native-backend idle cleanup, and ordinary errors release desktop state **without clearing consent**. Use `computer_use_revoke` to withdraw consent and stop work. Disconnecting, restarting, or reloading the MCP connection also clears consent. No grant is saved to disk or shared with another connection.
 
-Session approval also covers the recognized native **“Allow ChatGPT to use [app]?”** confirmation during `get_app_state`. The bridge returns a session-only acceptance with no persistence metadata. It requires the complete known empty-form shape from the configured Computer Use server; unknown formats, other prompts, and prompts during mutations still go to you. macOS Accessibility/Screen Recording permissions are not changed. Consequential actions—sending, deletion, purchases, and security changes—still require confirmation through the calling agent's instructions, not a semantic classifier in this bridge.
+Session approval also covers the recognized native **“Allow ChatGPT to use [app]?”** confirmation during `get_app_state`. The bridge returns a session-only acceptance with no persistence metadata. It recognizes both the basic empty form and the observed Chrome high-risk-app warning form from the configured Computer Use server. The initial consent prompt includes that warning about prompt injection and data theft/loss. Unknown warnings, extra fields, other prompts, and prompts during mutations still go to you. macOS Accessibility/Screen Recording permissions are not changed. Consequential actions—sending, deletion, purchases, and security changes—still require confirmation through the calling agent's instructions, not a semantic classifier in this bridge.
 
 Clients without form elicitation fail closed. For a specific app you explicitly want available without the initial bridge session prompt:
 
@@ -124,7 +126,8 @@ The bridge discovers and validates the **live tool schemas** from your installed
 | `perform_secondary_action` | An accessibility action exposed by an element                               |
 | `paste`                    | Formatted/multiline paste, **only if advertised by the native MCP backend** |
 | `computer_use_status`      | Bridge state and policy; no desktop read                                    |
-| `computer_use_stop`        | Release the backend session and invalidate inspected app state              |
+| `computer_use_stop`        | Release desktop state while retaining this connection's consent             |
+| `computer_use_revoke`      | Revoke consent and stop desktop work                                        |
 
 The JavaScript `@oai/sky` API and native MCP schemas are not identical. Do not assume options such as `disableDiff` or formatted `paste` exist just because the JavaScript API supports them. Use the advertised schema.
 
@@ -137,7 +140,7 @@ Workflow: **inspect → act sequentially → inspect/verify → stop**. An actio
 - Uses an ephemeral thread with **`on-request` approval and `read-only` sandbox policy**. The latter is a Codex thread policy, **not** a restriction on desktop mutations.
 - Exposes no generic RPC, shell, JavaScript execution, or model-turn tool. Unexpected model-turn events stop the connection.
 - Returns screenshots as native MCP image blocks. The bridge does not write screenshot or app-content logs. **Your harness/model receives this content and may retain it.** OpenAI’s installed service has its own behavior and settings.
-- Serializes calls within a server instance. Idle sessions expire after five minutes; stop/cancellation interrupt active work and invalidate queued actions. Orderly shutdown closes the backend's input; unexpected exits or forced cleanup report uncertainty and retain private state for inspection.
+- Serializes calls within a server instance. The native backend is released after five minutes idle; stop/cancellation interrupt active work and invalidate queued actions. Connection consent remains until explicit revoke or disconnect. Orderly shutdown closes the backend's input; unexpected exits or forced cleanup report uncertainty and retain private state for inspection.
 - Does not automatically grant macOS permissions. Explicit session consent covers only recognized native app-access forms during inspection, without permanent approval; everything else is forwarded or denied.
 
 **Only run one computer-use harness on a desktop at a time.** Separate server instances do not coordinate a global desktop lock. Do not use this on a sensitive live account without understanding the scope of app access. This is not an OS sandbox or a defense against a fully privileged malicious harness.
@@ -177,7 +180,9 @@ Tests use fake backends and in-memory MCP transports; they do not control your d
 MAC_COMPUTER_USE_LIVE=1 npm run test:live
 ```
 
-That test grants one bridge session approval but issues only Calculator operations. It clears the current entry, computes `4 + 5`, verifies the result text is `9`, checks for an image response, and stops the session. It asserts that no second approval request reached the client; unexpected native requests are cancelled. It leaves Calculator open and changes its current calculation/history.
+That test grants one bridge approval, computes `4 + 5 = 9` in Calculator, checks the screenshot, stops the backend, and starts another task on the same connection. It asserts one approval across task boundaries and verifies that explicit revoke clears consent. Unexpected native prompts are cancelled rather than hidden. It leaves Calculator open and changes its current calculation/history.
+
+Optionally add `MAC_COMPUTER_USE_CHROME=1` alongside `MAC_COMPUTER_USE_LIVE=1` to inspect the current Chrome window between Calculator tasks. This covers the browser's native high-risk-app warning; no browser content or screenshots are printed or saved by the test, and it does not navigate or click in Chrome.
 
 ### Primary implementation references
 

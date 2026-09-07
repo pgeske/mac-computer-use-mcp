@@ -15,8 +15,8 @@ const client = new Client(
 let approvalRequests = 0;
 client.setRequestHandler(ElicitRequestSchema, async (request) => {
   approvalRequests++;
-  // The opt-in test grants a session but only issues Calculator operations.
-  // Any forwarded native prompt makes this regression test fail, rather than masking it.
+  // The opt-in test only operates Calculator, plus optional read-only Chrome inspection.
+  // Any extra prompt fails the test rather than hiding an approval regression.
   if (
     approvalRequests === 1 &&
     request.params.mode === "form" &&
@@ -26,7 +26,7 @@ client.setRequestHandler(ElicitRequestSchema, async (request) => {
     Object.keys(request.params.requestedSchema.properties).length === 0
   ) {
     console.log(
-      "Approving one computer-use session for the Calculator-only test",
+      "Approving one computer-use connection for the scoped smoke test",
     );
     return { action: "accept", content: {} };
   }
@@ -68,14 +68,30 @@ try {
     after.result.content.some((block) => block.type === "image"),
     "Expected a native MCP screenshot",
   );
+  await call("computer_use_stop", {});
+
+  // A second task must reacquire the native backend without asking for consent again.
+  if (process.env.MAC_COMPUTER_USE_CHROME === "1") {
+    // Do not print or save the current browser's private app state/screenshot.
+    const chrome = await call("get_app_state", { app: "com.google.Chrome" });
+    assert.ok(chrome.result.content.some((block) => block.type === "image"));
+    console.log("Read-only Chrome inspection succeeded after Calculator stop");
+    await call("computer_use_stop", {});
+  }
+  await call("get_app_state", { app });
+  await call("computer_use_stop", {});
   assert.equal(
     approvalRequests,
     1,
-    "Expected only the bridge session approval",
+    "Expected one connection approval across tasks",
   );
-  await call("computer_use_stop", {});
+  const status = await call("computer_use_status", {});
+  assert.equal(JSON.parse(status.text).sessionApproved, true);
+  await call("computer_use_revoke", {});
+  const revoked = await call("computer_use_status", {});
+  assert.equal(JSON.parse(revoked.text).sessionApproved, false);
   console.log(
-    "PASS: Calculator returned 9, screenshot received, session stopped",
+    "PASS: task boundaries preserve one approval; explicit revoke clears it",
   );
 } finally {
   await client.close();
